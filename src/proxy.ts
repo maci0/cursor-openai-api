@@ -271,6 +271,45 @@ export async function startProxy(
       if (req.method === "POST" && url.pathname === "/v1/chat/completions") {
         try {
           const body = (await req.json()) as ChatCompletionRequest;
+
+          // Strip non-standard fields that Cursor's gRPC endpoint rejects
+          delete (body as Record<string, unknown>).prompt_cache_key;
+          delete (body as Record<string, unknown>).stream_options;
+          delete (body as Record<string, unknown>).reasoning_effort;
+
+          // Merge consecutive user messages — Cursor rejects back-to-back user turns
+          if (Array.isArray(body.messages)) {
+            const merged: typeof body.messages = [];
+            for (const msg of body.messages) {
+              if (msg.role === "user" && merged.length > 0 && merged[merged.length - 1].role === "user") {
+                const last = merged[merged.length - 1];
+                last.content = (last.content ?? "") + "\n" + (msg.content ?? "");
+              } else {
+                merged.push(msg);
+              }
+            }
+            body.messages = merged;
+          }
+
+          // Trim to fit Cursor's gRPC ~18k byte request limit.
+          // Large system prompts (e.g. from coding agents) and many verbose tool
+          // definitions together exceed the limit and cause resource_exhausted errors.
+          if (Array.isArray(body.tools)) {
+            body.tools = body.tools.slice(0, 8);
+            for (const tool of body.tools) {
+              if (tool.function?.description && tool.function.description.length > 200) {
+                tool.function.description = tool.function.description.slice(0, 200);
+              }
+            }
+          }
+          if (Array.isArray(body.messages)) {
+            for (const msg of body.messages) {
+              if (msg.role === "system" && typeof msg.content === "string" && msg.content.length > 3000) {
+                msg.content = msg.content.slice(0, 3000);
+              }
+            }
+          }
+
           const accessToken = await getAccessToken();
           return handleChatCompletion(body, accessToken);
         } catch (err) {
@@ -395,9 +434,11 @@ function parseMessages(messages: OpenAIMessage[]): ParsedMessages {
       });
     } else if (msg.role === "user") {
       if (pendingUser) {
-        pairs.push({ userText: pendingUser, assistantText: "" });
+        // Merge consecutive user messages instead of creating empty assistant turns
+        pendingUser = pendingUser + "\n" + (msg.content ?? "");
+      } else {
+        pendingUser = msg.content ?? "";
       }
-      pendingUser = msg.content ?? "";
     } else if (msg.role === "assistant") {
       // Skip assistant messages that are just tool_calls with no text
       const text = msg.content ?? "";
