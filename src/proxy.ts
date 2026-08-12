@@ -1013,19 +1013,12 @@ function handleStreamingResponse(
               payload.mcpTools,
               (data) => bridge.write(data),
               state,
-              // onText
+              // onText — thinking blocks are silently dropped; only regular text is streamed
               (text, isThinking) => {
                 if (isThinking) {
-                  if (!state.thinkingActive) {
-                    state.thinkingActive = true;
-                    sendSSE(makeChunk({ role: "assistant", content: "<think>" }));
-                  }
-                  sendSSE(makeChunk({ content: text }));
+                  state.thinkingActive = true;
                 } else {
-                  if (state.thinkingActive) {
-                    state.thinkingActive = false;
-                    sendSSE(makeChunk({ content: "</think>" }));
-                  }
+                  state.thinkingActive = false;
                   sendSSE(makeChunk({ content: text }));
                 }
               },
@@ -1036,7 +1029,7 @@ function handleStreamingResponse(
 
                 // Close thinking if active
                 if (state.thinkingActive) {
-                  sendSSE(makeChunk({ content: "</think>" }));
+                  // thinking block end — skip
                   state.thinkingActive = false;
                 }
 
@@ -1082,7 +1075,7 @@ function handleStreamingResponse(
         if (!mcpExecReceived) {
           // Normal completion — no pending tool calls
           if (state.thinkingActive) {
-            sendSSE(makeChunk({ content: "</think>" }));
+            // thinking block end — skip
           }
           sendSSE(makeChunk({}, "stop"));
           sendDone();
@@ -1237,16 +1230,9 @@ function handleToolResultResume(
               state,
               (text, isThinking) => {
                 if (isThinking) {
-                  if (!state.thinkingActive) {
-                    state.thinkingActive = true;
-                    sendSSE(makeChunk({ role: "assistant", content: "<think>" }));
-                  }
-                  sendSSE(makeChunk({ content: text }));
+                  state.thinkingActive = true;
                 } else {
-                  if (state.thinkingActive) {
-                    state.thinkingActive = false;
-                    sendSSE(makeChunk({ content: "</think>" }));
-                  }
+                  state.thinkingActive = false;
                   sendSSE(makeChunk({ content: text }));
                 }
               },
@@ -1255,7 +1241,7 @@ function handleToolResultResume(
                 mcpExecReceived = true;
 
                 if (state.thinkingActive) {
-                  sendSSE(makeChunk({ content: "</think>" }));
+                  // thinking block end — skip
                   state.thinkingActive = false;
                 }
 
@@ -1299,7 +1285,7 @@ function handleToolResultResume(
         clearInterval(heartbeatTimer);
         if (!mcpExecReceived) {
           if (state.thinkingActive) {
-            sendSSE(makeChunk({ content: "</think>" }));
+            // thinking block end — skip
           }
           sendSSE(makeChunk({}, "stop"));
           sendDone();
