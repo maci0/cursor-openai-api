@@ -275,7 +275,20 @@ export async function startProxy(
           // Strip non-standard fields that Cursor's gRPC endpoint rejects
           delete (body as Record<string, unknown>).prompt_cache_key;
           delete (body as Record<string, unknown>).stream_options;
+
+          // Map reasoning_effort → model variant suffix so callers can expose a
+          // single base model name (e.g. "claude-sonnet-5") and let effort level
+          // select the right Cursor variant (e.g. "claude-sonnet-5-high").
+          // Models that have no effort variants are passed through unchanged.
+          const effortSuffix: Record<string, string> = { none: "low", low: "low", medium: "medium", high: "high", xhigh: "xhigh", max: "xhigh" };
+          const noSuffixModels = new Set(["auto", "default", "composer-2.5", "gemini-3.1-pro", "gemini-3-flash"]);
+          const effort = ((body as Record<string, unknown>).reasoning_effort as string) ?? "high";
           delete (body as Record<string, unknown>).reasoning_effort;
+          const base = body.model ?? "";
+          const hasSuffix = /(low|medium|high|xhigh|max|none)$/.test(base);
+          if (!hasSuffix && !noSuffixModels.has(base) && effortSuffix[effort]) {
+            body.model = `${base}-${effortSuffix[effort]}`;
+          }
 
           // Merge consecutive user messages — Cursor rejects back-to-back user turns
           if (Array.isArray(body.messages)) {
