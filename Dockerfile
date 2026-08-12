@@ -17,7 +17,6 @@ WORKDIR /app
 RUN npm install -g bun
 
 COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/src/h2-bridge.mjs ./h2-bridge.mjs
 COPY --from=builder /app/node_modules ./node_modules
 COPY package.json .
 

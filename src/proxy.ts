@@ -68,11 +68,13 @@ import {
   type McpToolDefinition,
 } from "./proto/agent_pb";
 import { createHash } from "node:crypto";
-import { resolve as pathResolve } from "node:path";
+import { resolve as pathResolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const CURSOR_API_URL = "https://api2.cursor.sh";
 const CONNECT_END_STREAM_FLAG = 0b00000010;
-const BRIDGE_PATH = pathResolve(import.meta.dir, "h2-bridge.mjs");
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const BRIDGE_PATH = pathResolve(__dirname, "h2-bridge.mjs");
 
 // --- Types ---
 
@@ -270,11 +272,11 @@ export async function startProxy(
 
       if (req.method === "POST" && url.pathname === "/v1/chat/completions") {
         try {
-          const body = (await req.json()) as ChatCompletionRequest;
+          const rawBody = (await req.json()) as Record<string, unknown>;
 
           // Strip non-standard fields that Cursor's gRPC endpoint rejects
-          delete (body as Record<string, unknown>).prompt_cache_key;
-          delete (body as Record<string, unknown>).stream_options;
+          delete rawBody.prompt_cache_key;
+          delete rawBody.stream_options;
 
           // Map reasoning_effort → model variant suffix so callers can expose a
           // single base model name (e.g. "claude-sonnet-5") and let effort level
@@ -282,8 +284,9 @@ export async function startProxy(
           // Models that have no effort variants are passed through unchanged.
           const effortSuffix: Record<string, string> = { none: "low", low: "low", medium: "medium", high: "high", xhigh: "xhigh", max: "xhigh" };
           const noSuffixModels = new Set(["auto", "default", "composer-2.5", "gemini-3.1-pro", "gemini-3-flash"]);
-          const effort = ((body as Record<string, unknown>).reasoning_effort as string) ?? "high";
-          delete (body as Record<string, unknown>).reasoning_effort;
+          const effort = (rawBody.reasoning_effort as string) ?? "high";
+          delete rawBody.reasoning_effort;
+          const body = rawBody as unknown as ChatCompletionRequest;
           const base = body.model ?? "";
           const hasSuffix = /(low|medium|high|xhigh|max|none)$/.test(base);
           if (!hasSuffix && !noSuffixModels.has(base) && effortSuffix[effort]) {
@@ -361,10 +364,10 @@ export function stopProxy(): void {
 
 // --- Chat Completion Handler ---
 
-function handleChatCompletion(
+async function handleChatCompletion(
   body: ChatCompletionRequest,
   accessToken: string,
-): Response {
+): Promise<Response> {
   const { systemPrompt, userText, turns, toolResults } = parseMessages(body.messages);
   const modelId = body.model;
   const tools = body.tools ?? [];
@@ -1306,11 +1309,11 @@ function handleToolResultResume(
 
 // --- Non-Streaming Handler ---
 
-function handleNonStreamingResponse(
+async function handleNonStreamingResponse(
   payload: CursorRequestPayload,
   accessToken: string,
   modelId: string,
-): Response {
+): Promise<Response> {
   const completionId = `chatcmpl-${crypto.randomUUID().replace(/-/g, "").slice(0, 28)}`;
   const created = Math.floor(Date.now() / 1000);
 
@@ -1339,7 +1342,7 @@ function handleNonStreamingResponse(
       ),
   );
 
-  return responsePromise as unknown as Response;
+  return await responsePromise;
 }
 
 async function collectFullResponse(

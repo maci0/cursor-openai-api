@@ -3,7 +3,7 @@
  *
  * Serves Cursor API as OpenAI-compatible endpoint with OAuth authentication.
  */
-import { login, logout, getStoredCredentials, isAuthenticated } from "./cli-auth";
+import { login, logout, getStoredCredentials, isAuthenticated, refreshCursorToken, saveCredentials } from "./cli-auth";
 import { startProxy, stopProxy, getProxyPort } from "./proxy";
 import { getCursorModels } from "./models";
 import { getTokenExpiry } from "./auth";
@@ -67,15 +67,23 @@ async function cmdModels() {
 }
 
 async function cmdServe(port: number) {
-  const creds = getStoredCredentials();
+  let creds = getStoredCredentials();
   if (!creds) {
     console.log("❌ Not logged in. Run `cursor-api login` first.");
     process.exit(1);
   }
 
   if (creds.expires < Date.now()) {
-    console.log("⚠️  Token expired. Run `cursor-api login` to re-authenticate.");
-    process.exit(1);
+    console.log("⚠️  Token expired. Attempting refresh...");
+    try {
+      const refreshed = await refreshCursorToken(creds.refresh);
+      saveCredentials(refreshed);
+      creds = { access: refreshed.access, refresh: refreshed.refresh, expires: refreshed.expires };
+      console.log("✅ Token refreshed successfully.");
+    } catch {
+      console.log("❌ Token refresh failed. Run `cursor-api login` to re-authenticate.");
+      process.exit(1);
+    }
   }
 
   console.log(`🚀 Starting Cursor OpenAI API proxy on port ${port}...`);
@@ -83,7 +91,20 @@ async function cmdServe(port: number) {
   console.log(`   Models: http://localhost:${port}/v1/models`);
   console.log(`   Press Ctrl+C to stop.\n`);
 
-  const proxyPort = await startProxy(async () => creds.access, port);
+  const getAccessToken = async (): Promise<string> => {
+    if (creds!.expires < Date.now()) {
+      try {
+        const refreshed = await refreshCursorToken(creds!.refresh);
+        saveCredentials(refreshed);
+        creds = { access: refreshed.access, refresh: refreshed.refresh, expires: refreshed.expires };
+      } catch {
+        console.error("⚠️  Token refresh failed. Returning stale token.");
+      }
+    }
+    return creds!.access;
+  };
+
+  const proxyPort = await startProxy(getAccessToken, port);
 
   console.log(`✅ Server running at http://localhost:${proxyPort}\n`);
 
@@ -143,10 +164,12 @@ async function main() {
       await cmdModels();
       break;
     case "serve": {
+      const argPort = parseInt(args[1] ?? "", 10);
       const envPort = parseInt(process.env.PORT ?? "", 10);
-      const port = envPort || PROXY_PORT;
-      if (isNaN(port) || port < 1 || port > 65535) {
-        console.error(`Invalid port: ${process.env.PORT}. Using default ${PROXY_PORT}.`);
+      const rawPort = argPort || envPort || PROXY_PORT;
+      const port = (!isNaN(rawPort) && rawPort >= 1 && rawPort <= 65535) ? rawPort : PROXY_PORT;
+      if (rawPort !== port) {
+        console.error(`Invalid port: ${args[1] ?? process.env.PORT}. Using default ${PROXY_PORT}.`);
       }
       await cmdServe(port);
       break;

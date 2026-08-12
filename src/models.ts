@@ -3,7 +3,7 @@
  * Uses curl for HTTP/2 transport (Bun's node:http2 is broken).
  * Falls back to a hardcoded list if the endpoint is unreachable.
  */
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { writeFileSync, readFileSync, unlinkSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -147,7 +147,7 @@ async function fetchViaHttp2(
     const timeoutSecs = Math.ceil(timeoutMs / 1000);
     const url = `${baseUrl}${GET_USABLE_MODELS_PATH}`;
     const args = [
-      "curl", "-s", "--http2",
+      "-s", "--http2",
       "--max-time", String(timeoutSecs),
       "-X", "POST",
       ...headerArgs,
@@ -156,7 +156,7 @@ async function fetchViaHttp2(
       "-w", "%{http_code}",
       url,
     ];
-    const status = execSync(args.map(a => a.includes(' ') ? `"${a}"` : a).join(' '), {
+    const status = execFileSync("curl", args, {
       timeout: timeoutMs + 2000,
       stdio: ["pipe", "pipe", "pipe"],
     }).toString().trim();

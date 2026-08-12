@@ -2,7 +2,6 @@
  * Cursor OAuth authentication for standalone CLI.
  * Handles PKCE-based login, polling, token refresh, and file-based storage.
  */
-import { generatePKCE } from "./pkce";
 import {
   generateCursorAuthParams,
   pollCursorAuth,
@@ -10,15 +9,6 @@ import {
   getTokenExpiry,
   type CursorCredentials,
 } from "./auth";
-
-const CURSOR_LOGIN_URL = "https://cursor.com/loginDeepControl";
-const CURSOR_POLL_URL = "https://api2.cursor.sh/auth/poll";
-const CURSOR_REFRESH_URL = "https://api2.cursor.sh/auth/exchange_user_api_key";
-
-const POLL_MAX_ATTEMPTS = 150;
-const POLL_BASE_DELAY = 1000;
-const POLL_MAX_DELAY = 10_000;
-const POLL_BACKOFF_MULTIPLIER = 1.2;
 
 const CONFIG_DIR = `${process.env.HOME}/.config/cursor-openai-api`;
 const CREDENTIALS_FILE = `${CONFIG_DIR}/credentials.json`;
@@ -85,9 +75,9 @@ export async function login(): Promise<{ accessToken: string; refreshToken: stri
   console.log(`   ${loginUrl}\n`);
 
   try {
-    const { exec } = require("node:child_process");
+    const { execFile } = require("node:child_process");
     const openCmd = process.platform === "darwin" ? "open" : "xdg-open";
-    exec(`${openCmd} "${loginUrl}"`);
+    execFile(openCmd, [loginUrl]);
   } catch {}
 
   console.log("⏳ Waiting for authentication...\n");
